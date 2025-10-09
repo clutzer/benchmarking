@@ -1,5 +1,7 @@
 #!/bin/bash
 
+sudo apt install python3-venv python-is-python3
+
 if [ ! -d benchmarking ]; then
     echo "Creating 'benchmarking' Python virtual environment..."
     python -m venv benchmarking
