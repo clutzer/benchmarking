@@ -4,115 +4,114 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 import warnings
 import argparse
 
-warnings.filterwarnings("ignore")  # Suppress minor warnings
+warnings.filterwarnings("ignore")
 
-# Parse command-line arguments
-parser = argparse.ArgumentParser(description="Benchmark a model on specified or all GPUs")
-parser.add_argument("--device", type=str, default=None, help="Device to use (e.g., 'cuda:0', 'cuda:1'). If not specified, uses all available GPUs.")
+parser = argparse.ArgumentParser()
+parser.add_argument("--device", type=str, default=None)
 args = parser.parse_args()
 
 # Config
-model_name = "microsoft/DialoGPT-medium"  # Or "meta-llama/Llama-2-7b-chat-hf"
-input_length = 512  # Approx input tokens
-output_length = 128  # Output tokens to generate
-num_runs = 10  # Average over runs
-batch_size = 1  # Single prompt for latency focus
+model_name = "microsoft/DialoGPT-medium"
+input_length = 512
+output_length = 128
+num_runs = 20
+cooldown_sec = 5
 
-# Determine device(s)
+torch.manual_seed(42)
+torch.cuda.manual_seed_all(42)
+
 if args.device:
     device = args.device
-    if not torch.cuda.is_available() or (device.startswith("cuda") and int(device.split(":")[-1]) >= torch.cuda.device_count()):
-        raise ValueError(f"Device {device} is not available. Available devices: {[f'cuda:{i}' for i in range(torch.cuda.device_count())] if torch.cuda.is_available() else ['cpu']}")
 else:
-    device = "cuda" if torch.cuda.is_available() else "cpu"  # Use all GPUs if available, else CPU
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Prompt (adjust to hit ~input_length tokens)
-prompt = "Explain quantum computing in simple terms. " * 50  # ~512 tokens
-
-# Load model and tokenizer
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token  # Set pad_token if unset
-
-# Initialize model
+    tokenizer.pad_token = tokenizer.eos_token
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
-    dtype=torch.float16,  # FP16 for speed (H100/Blackwell optimized)
+    dtype=torch.float16,
     low_cpu_mem_usage=True
-)
+).to(device)
+model.eval()
 
-# Move model to device(s)
-if device == "cuda" and torch.cuda.device_count() > 1:
-    print(f"Using all {torch.cuda.device_count()} GPUs")
-    model = torch.nn.DataParallel(model)  # Use all GPUs with DataParallel
-model = model.to(device)
-
-# Tokenize input with attention mask
+prompt_text = "Explain quantum computing in simple terms. " * 50
 inputs = tokenizer(
-    prompt,
-    return_tensors="pt",
-    padding=True,
-    truncation=True,
-    max_length=input_length,
-    return_attention_mask=True
-)
-input_ids = inputs["input_ids"].to(device)
-attention_mask = inputs["attention_mask"].to(device)
+    prompt_text, return_tensors="pt", truncation=True, max_length=input_length
+).to(device)
 
-# Warmup run
+# Warmup
 with torch.no_grad():
-    _ = model.generate(
-        input_ids,
-        attention_mask=attention_mask,
-        max_new_tokens=10,
-        do_sample=False,
-        pad_token_id=tokenizer.eos_token_id
-    )
+    for _ in range(5):
+        _ = model.generate(**inputs, max_new_tokens=10, do_sample=False)
+torch.cuda.synchronize()
 
-# Benchmark runs
 ttft_list = []
 tps_list = []
 
-for _ in range(num_runs):
-    # Measure TTFT (prompt eval + first token)
-    start_time = time.time()
-    with torch.no_grad():
-        # Prompt evaluation
-        outputs = model(input_ids, attention_mask=attention_mask)
-        prompt_eval_time = time.time() - start_time
+for i in range(num_runs):
+    torch.cuda.empty_cache()
     
-    # First token decode
-    logits = outputs.logits[:, -1, :]  # Last token's logits
-    next_token = torch.argmax(logits, dim=-1, keepdim=True)  # Greedy decode
-    first_token_time = time.time() - start_time - prompt_eval_time
-    ttft = prompt_eval_time + first_token_time  # TTFT = eval + first decode
-
-    # Full generation for TPS
-    gen_start = time.time()
+    # --- TTFT: Prompt eval + first token (full forward) ---
+    start_event = torch.cuda.Event(enable_timing=True)
+    mid_event = torch.cuda.Event(enable_timing=True)
+    end_event = torch.cuda.Event(enable_timing=True)
+    
+    start_event.record()
     with torch.no_grad():
-        gen_outputs = model.generate(
-            input_ids,
-            attention_mask=attention_mask,
-            max_new_tokens=output_length,
-            do_sample=True,
-            temperature=0.7,
-            pad_token_id=tokenizer.eos_token_id
-        )
-    gen_time = time.time() - gen_start
-    decode_tokens = gen_outputs.shape[1] - input_ids.shape[1]  # Generated tokens
-    tps = decode_tokens / gen_time if gen_time > 0 else 0
-
+        outputs = model(**inputs, return_dict=True, use_cache=True)  # Prompt eval, get KV cache
+        mid_event.record()
+        
+        # First token from logits
+        logits = outputs.logits[:, -1, :]
+        next_token = torch.argmax(logits, dim=-1).unsqueeze(-1)
+    end_event.record()
+    torch.cuda.synchronize()
+    
+    prompt_time = start_event.elapsed_time(mid_event) / 1000.0
+    first_token_time = mid_event.elapsed_time(end_event) / 1000.0
+    ttft = prompt_time + first_token_time
     ttft_list.append(ttft)
+    
+    # --- TPS: Decode remaining tokens reusing KV cache ---
+    past_key_values = outputs.past_key_values
+    generated_tokens = 1  # Already have first
+    decode_start = torch.cuda.Event(enable_timing=True)
+    decode_start.record()
+    
+    current_input = next_token
+    with torch.no_grad():
+        while generated_tokens < output_length:
+            outputs = model(
+                input_ids=current_input,
+                past_key_values=past_key_values,
+                use_cache=True,
+                return_dict=True
+            )
+            logits = outputs.logits[:, -1, :]
+            next_token = torch.argmax(logits, dim=-1).unsqueeze(-1)
+            current_input = next_token
+            past_key_values = outputs.past_key_values
+            generated_tokens += 1
+    decode_end = torch.cuda.Event(enable_timing=True)
+    decode_end.record()
+    torch.cuda.synchronize()
+    
+    decode_time = decode_start.elapsed_time(decode_end) / 1000.0
+    decode_tokens = output_length - 1  # Exclude first token (measured in TTFT)
+    tps = (output_length) / (first_token_time + decode_time) if (first_token_time + decode_time) > 0 else 0  # Total decode TPS
     tps_list.append(tps)
+    
+    print(f"Run {i+1}: TTFT={ttft:.4f}s (prompt={prompt_time:.4f}+first={first_token_time:.4f}), TPS={tps:.2f}")
+    
+    if i < num_runs - 1:
+        time.sleep(cooldown_sec)
 
-# Results
 avg_ttft = sum(ttft_list) / num_runs
+std_ttft = (sum((x - avg_ttft) ** 2 for x in ttft_list) / num_runs) ** 0.5
 avg_tps = sum(tps_list) / num_runs
-print(f"Average TTFT: {avg_ttft:.4f} seconds")
-print(f"Average Tokens/Second (decode): {avg_tps:.2f}")
+std_tps = (sum((x - avg_tps) ** 2 for x in tps_list) / num_runs) ** 0.5
 
-# System info
-if device == "cuda" and torch.cuda.device_count() > 1:
-    print(f"System Info: {torch.cuda.device_count()} GPUs, {[torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]}")
-else:
-    print(f"System Info: 1 GPU, {torch.cuda.get_device_name(device) if device.startswith('cuda') else 'CPU'}")
+print(f"Average TTFT: {avg_ttft:.4f}s ± {std_ttft:.4f}")
+print(f"Average TPS (decode): {avg_tps:.2f} ± {std_tps:.2f}")
+print(f"System: {torch.cuda.get_device_name(device)}")
