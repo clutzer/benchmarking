@@ -6,8 +6,8 @@ import argparse
 
 warnings.filterwarnings("ignore")
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--device", type=str, default=None)
+parser = argparse.ArgumentParser(description="Benchmark a model on specified or all GPUs")
+parser.add_argument("--device", type=str, default=None, help="Device to use (e.g., 'cuda:0', 'cuda:1'). If not specified, uses all available GPUs.")
 args = parser.parse_args()
 
 # Config
