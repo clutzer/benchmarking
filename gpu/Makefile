@@ -1,7 +1,7 @@
-# vim: set ts=4 sw=4 et:
+# vim: set ts=4 sw=4:
 
 llm-01:
-	python llm_bench.py
+	python llm_bench.py --device cuda:0
 
 val2017.zip:
 	wget http://images.cocodataset.org/zips/val2017.zip

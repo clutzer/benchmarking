@@ -112,6 +112,9 @@ std_ttft = (sum((x - avg_ttft) ** 2 for x in ttft_list) / num_runs) ** 0.5
 avg_tps = sum(tps_list) / num_runs
 std_tps = (sum((x - avg_tps) ** 2 for x in tps_list) / num_runs) ** 0.5
 
+print("\n+--------------------------+"  )
+print(  "|     Benchmark Summary    |"  )
+print(  "+--------------------------+\n")
 print(f"Average TTFT: {avg_ttft:.4f}s ± {std_ttft:.4f}")
 print(f"Average TPS (decode): {avg_tps:.2f} ± {std_tps:.2f}")
 print(f"System: {torch.cuda.get_device_name(device)}")
