@@ -6,16 +6,27 @@ import argparse
 
 warnings.filterwarnings("ignore")
 
-parser = argparse.ArgumentParser(description="Benchmark a model on specified or all GPUs")
+# Argument parser for device, precision, num_runs, and cooldown_sec
+parser = argparse.ArgumentParser(description="Benchmark a model on specified or all GPUs with chosen precision")
 parser.add_argument("--device", type=str, default=None, help="Device to use (e.g., 'cuda:0', 'cuda:1'). If not specified, uses all available GPUs.")
+parser.add_argument("--precision", type=str, default="fp16", choices=["fp16", "fp32"], help="Precision to use: 'fp16' or 'fp32' (default: fp16)")
+parser.add_argument("--num_runs", type=int, default=20, help="Number of benchmark runs (default: 20)")
+parser.add_argument("--cooldown_sec", type=float, default=5.0, help="Cooldown time between runs in seconds (default: 5.0)")
 args = parser.parse_args()
 
 # Config
 model_name = "microsoft/DialoGPT-medium"
 input_length = 512
 output_length = 128
-num_runs = 20
-cooldown_sec = 5
+num_runs = args.num_runs
+cooldown_sec = args.cooldown_sec
+
+# Map precision argument to torch dtype
+precision_map = {
+    "fp16": torch.float16,
+    "fp32": torch.float32
+}
+dtype = precision_map[args.precision]
 
 torch.manual_seed(42)
 torch.cuda.manual_seed_all(42)
@@ -25,15 +36,31 @@ if args.device:
 else:
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
+# Load tokenizer and model
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
-    dtype=torch.float16,
+    dtype=dtype,
     low_cpu_mem_usage=True
 ).to(device)
 model.eval()
+
+# Calculate number of parameters
+num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+# Print model information
+print("\n+--------------------------+")
+print("|       Model Details       |")
+print("+--------------------------+\n")
+print(f"Model: {model_name}")
+print(f"Number of Parameters: {num_params:,}")
+print(f"Precision: {args.precision.upper()} (torch.{dtype})")
+print(f"Optimization Note: DialoGPT-medium is not specifically optimized for any precision but is loaded in {args.precision.upper()} for this run.")
+print(f"Device: {torch.cuda.get_device_name(device) if device.startswith('cuda') else device}")
+print(f"Number of Runs: {num_runs}")
+print(f"Cooldown Between Runs: {cooldown_sec:.1f}s")
 
 prompt_text = "Explain quantum computing in simple terms. " * 50
 inputs = tokenizer(
@@ -112,9 +139,10 @@ std_ttft = (sum((x - avg_ttft) ** 2 for x in ttft_list) / num_runs) ** 0.5
 avg_tps = sum(tps_list) / num_runs
 std_tps = (sum((x - avg_tps) ** 2 for x in tps_list) / num_runs) ** 0.5
 
-print("\n+--------------------------+"  )
-print(  "|     Benchmark Summary    |"  )
-print(  "+--------------------------+\n")
+# ASCII-framed summary title
+print("\n+--------------------------+")
+print("|      Benchmark Summary    |")
+print("+--------------------------+\n")
 print(f"Average TTFT: {avg_ttft:.4f}s ± {std_ttft:.4f}")
 print(f"Average TPS (decode): {avg_tps:.2f} ± {std_tps:.2f}")
-print(f"System: {torch.cuda.get_device_name(device)}")
+print(f"System: {torch.cuda.get_device_name(device) if device.startswith('cuda') else device}")
