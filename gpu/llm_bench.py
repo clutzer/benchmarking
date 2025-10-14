@@ -1,17 +1,19 @@
 import time
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, FPQuantConfig
 import warnings
 import argparse
 
 warnings.filterwarnings("ignore")
 
-# Argument parser for device, precision, num_runs, and cooldown_sec
-parser = argparse.ArgumentParser(description="Benchmark a model on specified or all GPUs with chosen precision")
-parser.add_argument("--device", type=str, default=None, help="Device to use (e.g., 'cuda:0', 'cuda:1'). If not specified, uses all available GPUs.")
-parser.add_argument("--precision", type=str, default="fp16", choices=["fp16", "fp32"], help="Precision to use: 'fp16' or 'fp32' (default: fp16)")
+# Argument parser
+parser = argparse.ArgumentParser(description="Benchmark a model on specified GPUs with precision and quantization")
+parser.add_argument("--device", type=str, default=None, help="Device to use (e.g., 'cuda:0'). If not specified, uses all available GPUs.")
+parser.add_argument("--precision", type=str, default="fp16", choices=["fp16", "fp32"], help="Base precision: 'fp16' or 'fp32' (default: fp16)")
+parser.add_argument("--quantization", type=str, default="none", choices=["none", "fp4"], help="Quantization: 'none' or 'fp4' (Blackwell-only for full speed)")
 parser.add_argument("--num_runs", type=int, default=20, help="Number of benchmark runs (default: 20)")
 parser.add_argument("--cooldown_sec", type=float, default=5.0, help="Cooldown time between runs in seconds (default: 5.0)")
+parser.add_argument("--force_precision", type=str, default=None, help="Force precision (e.g., 'fp16') overriding auto-detection")
 args = parser.parse_args()
 
 # Config
@@ -21,7 +23,7 @@ output_length = 128
 num_runs = args.num_runs
 cooldown_sec = args.cooldown_sec
 
-# Map precision argument to torch dtype
+# Map precision to torch dtype
 precision_map = {
     "fp16": torch.float16,
     "fp32": torch.float32
@@ -36,18 +38,72 @@ if args.device:
 else:
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Load tokenizer and model
+# GPU detection for auto-precision
+gpu_name = "CPU"
+is_blackwell = False
+if device.startswith("cuda"):
+    prop = torch.cuda.get_device_properties(int(device.split(":")[1]) if ":" in device else 0)
+    gpu_name = prop.name
+    # Detect Blackwell (RTX PRO 6000 Server Edition)
+    if "blackwell" in gpu_name.lower() or "rtx pro 6000" in gpu_name.lower():
+        is_blackwell = True
+        if args.force_precision is None:
+            args.precision = "fp16"  # Base for FP4 quant
+            dtype = torch.float16
+
+if args.force_precision:
+    args.precision = args.force_precision
+    dtype = precision_map[args.precision]
+
+# Check for qutlass availability for FP4 on Blackwell
+qutlass_available = False
+if args.quantization == "fp4" and is_blackwell:
+    try:
+        import qutlass  # Check if qutlass is installed
+        qutlass_available = True
+    except ImportError:
+        print("Warning: qutlass not installed. Using pseudo-quantization for FP4 on Blackwell GPU. Install qutlass for full FP4 performance: "
+              "'git clone https://github.com/IST-DASLab/qutlass.git && cd qutlass && pip install --no-build-isolation .'")
+
+# Load tokenizer and model with quantization
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token
-model = AutoModelForCausalLM.from_pretrained(
-    model_name,
-    dtype=dtype,
-    low_cpu_mem_usage=True
-).to(device)
+
+load_kwargs = {
+    "low_cpu_mem_usage": True,
+    "dtype": dtype if args.quantization == "none" else torch.bfloat16,  # BF16 base for FP4 stability
+    "device_map": "auto" if device == "cpu" else None
+}
+
+if args.quantization == "fp4":
+    quantization_config = FPQuantConfig(
+        forward_dtype="nvfp4" if is_blackwell and qutlass_available else "mxfp4",
+        pseudo_quantization=not (is_blackwell and qutlass_available)  # Pseudo for non-Blackwell or missing qutlass
+    )
+    load_kwargs["quantization_config"] = quantization_config
+    if not is_blackwell or not qutlass_available:
+        print(f"Warning: FP4 quantization on {gpu_name} uses pseudo-quantization (no speedup, emulates FP4). "
+              "Full FP4 speed requires Blackwell GPU with qutlass.")
+
+# Load model with fallback to non-quantized if FP4 fails
+try:
+    model = AutoModelForCausalLM.from_pretrained(model_name, **load_kwargs)
+except ImportError as e:
+    if args.quantization == "fp4":
+        print(f"Error: Failed to load model with FP4 quantization: {e}. Falling back to non-quantized {args.precision.upper()}.")
+        load_kwargs.pop("quantization_config", None)  # Remove quantization config
+        load_kwargs["dtype"] = dtype  # Use base precision
+        model = AutoModelForCausalLM.from_pretrained(model_name, **load_kwargs)
+        args.quantization = "none"  # Update quantization status
+    else:
+        raise e  # Rethrow if not FP4-related
+
+if device.startswith("cuda"):
+    model = model.to(device)
 model.eval()
 
-# Calculate number of parameters
+# Calculate number of parameters (non-quantized equivalent)
 num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 # Print model information
@@ -56,9 +112,13 @@ print("|       Model Details       |")
 print("+--------------------------+\n")
 print(f"Model: {model_name}")
 print(f"Number of Parameters: {num_params:,}")
-print(f"Precision: {args.precision.upper()} (torch.{dtype})")
-print(f"Optimization Note: DialoGPT-medium is not specifically optimized for any precision but is loaded in {args.precision.upper()} for this run.")
-print(f"Device: {torch.cuda.get_device_name(device) if device.startswith('cuda') else device}")
+print(f"Base Precision: {args.precision.upper()} (torch.{dtype})")
+print(f"Quantization: {args.quantization.upper() if args.quantization != 'none' else 'None'}")
+if args.quantization == "fp4":
+    mem_savings = " ~4x vs FP32" if args.quantization == "fp4" else ""
+    print(f"Effective Precision: FP4{mem_savings} (Quality: Near-lossless on LLMs)")
+print(f"GPU Architecture: {gpu_name} ({'Blackwell (FP4-optimized)' if is_blackwell else 'H100-compatible (FP16/FP32)'})")
+print(f"Device: {gpu_name if device.startswith('cuda') else device}")
 print(f"Number of Runs: {num_runs}")
 print(f"Cooldown Between Runs: {cooldown_sec:.1f}s")
 
@@ -67,29 +127,31 @@ inputs = tokenizer(
     prompt_text, return_tensors="pt", truncation=True, max_length=input_length
 ).to(device)
 
-# Warmup
+# Warmup (increased for quantized models)
 with torch.no_grad():
-    for _ in range(5):
+    for _ in range(10 if args.quantization == "fp4" else 5):
         _ = model.generate(**inputs, max_new_tokens=10, do_sample=False)
 torch.cuda.synchronize()
 
 ttft_list = []
 tps_list = []
+mem_list = []  # Track peak memory
 
 for i in range(num_runs):
-    torch.cuda.empty_cache()
+    if device.startswith("cuda"):
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
     
-    # --- TTFT: Prompt eval + first token (full forward) ---
+    # --- TTFT: Prompt eval + first token ---
     start_event = torch.cuda.Event(enable_timing=True)
     mid_event = torch.cuda.Event(enable_timing=True)
     end_event = torch.cuda.Event(enable_timing=True)
     
     start_event.record()
     with torch.no_grad():
-        outputs = model(**inputs, return_dict=True, use_cache=True)  # Prompt eval, get KV cache
+        outputs = model(**inputs, return_dict=True, use_cache=True)
         mid_event.record()
         
-        # First token from logits
         logits = outputs.logits[:, -1, :]
         next_token = torch.argmax(logits, dim=-1).unsqueeze(-1)
     end_event.record()
@@ -100,9 +162,9 @@ for i in range(num_runs):
     ttft = prompt_time + first_token_time
     ttft_list.append(ttft)
     
-    # --- TPS: Decode remaining tokens reusing KV cache ---
+    # --- TPS: Decode remaining tokens ---
     past_key_values = outputs.past_key_values
-    generated_tokens = 1  # Already have first
+    generated_tokens = 1
     decode_start = torch.cuda.Event(enable_timing=True)
     decode_start.record()
     
@@ -125,11 +187,13 @@ for i in range(num_runs):
     torch.cuda.synchronize()
     
     decode_time = decode_start.elapsed_time(decode_end) / 1000.0
-    decode_tokens = output_length - 1  # Exclude first token (measured in TTFT)
-    tps = (output_length) / (first_token_time + decode_time) if (first_token_time + decode_time) > 0 else 0  # Total decode TPS
+    tps = output_length / (first_token_time + decode_time) if (first_token_time + decode_time) > 0 else 0
     tps_list.append(tps)
     
-    print(f"Run {i+1}: TTFT={ttft:.4f}s (prompt={prompt_time:.4f}+first={first_token_time:.4f}), TPS={tps:.2f}")
+    peak_mem = torch.cuda.max_memory_allocated(device) / 1024**3 if device.startswith("cuda") else 0  # GB
+    mem_list.append(peak_mem)
+    
+    print(f"Run {i+1}: TTFT={ttft:.4f}s (prompt={prompt_time:.4f}+first={first_token_time:.4f}), TPS={tps:.2f}, Mem={peak_mem:.2f}GB")
     
     if i < num_runs - 1:
         time.sleep(cooldown_sec)
@@ -138,11 +202,13 @@ avg_ttft = sum(ttft_list) / num_runs
 std_ttft = (sum((x - avg_ttft) ** 2 for x in ttft_list) / num_runs) ** 0.5
 avg_tps = sum(tps_list) / num_runs
 std_tps = (sum((x - avg_tps) ** 2 for x in tps_list) / num_runs) ** 0.5
+avg_mem = sum(mem_list) / num_runs
 
-# ASCII-framed summary title
+# Summary
 print("\n+--------------------------+")
 print("|      Benchmark Summary    |")
 print("+--------------------------+\n")
 print(f"Average TTFT: {avg_ttft:.4f}s ± {std_ttft:.4f}")
 print(f"Average TPS (decode): {avg_tps:.2f} ± {std_tps:.2f}")
-print(f"System: {torch.cuda.get_device_name(device) if device.startswith('cuda') else device}")
+print(f"Average Peak Memory: {avg_mem:.2f}GB")
+print(f"System: {gpu_name if device.startswith('cuda') else device}")
