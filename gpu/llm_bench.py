@@ -14,10 +14,11 @@ parser.add_argument("--quantization", type=str, default="none", choices=["none",
 parser.add_argument("--num_runs", type=int, default=20, help="Number of benchmark runs (default: 20)")
 parser.add_argument("--cooldown_sec", type=float, default=5.0, help="Cooldown time between runs in seconds (default: 5.0)")
 parser.add_argument("--force_precision", type=str, default=None, help="Force precision (e.g., 'fp16') overriding auto-detection")
+parser.add_argument("--model", type=str, default="microsoft/DialoGPT-medium", help="The model to benchmark")
 args = parser.parse_args()
 
 # Config
-model_name = "microsoft/DialoGPT-medium"
+model_name = args.model
 input_length = 512
 output_length = 128
 num_runs = args.num_runs
