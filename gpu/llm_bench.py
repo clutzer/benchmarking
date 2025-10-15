@@ -57,13 +57,16 @@ if args.force_precision:
 
 # Check for qutlass availability for FP4 on Blackwell
 qutlass_available = False
+use_pseudo_quantization = False
 if args.quantization == "fp4" and is_blackwell:
     try:
         import qutlass  # Check if qutlass is installed
         qutlass_available = True
+        print("qutlass detected: Enabling native FP4 (nvfp4) quantization.")
     except ImportError:
         print("Warning: qutlass not installed. Using pseudo-quantization for FP4 on Blackwell GPU. Install qutlass for full FP4 performance: "
-              "'git clone https://github.com/IST-DASLab/qutlass.git && cd qutlass && pip install --no-build-isolation .'")
+              "'cd /home/nvidia/benchmarking/gpu/qutlass && pip install --no-build-isolation . -v --global-option=\"--cmake-args=-DCUTLASS_NVCC_ARCHS=120 -DCMAKE_CUDA_ARCHITECTURES=120\"'")
+        use_pseudo_quantization = True
 
 # Load tokenizer and model with quantization
 tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -73,33 +76,46 @@ if tokenizer.pad_token is None:
 load_kwargs = {
     "low_cpu_mem_usage": True,
     "dtype": dtype if args.quantization == "none" else torch.bfloat16,  # BF16 base for FP4 stability
-    "device_map": "auto" if device == "cpu" else None
 }
 
+quantization_status = args.quantization
 if args.quantization == "fp4":
-    quantization_config = FPQuantConfig(
-        forward_dtype="nvfp4" if is_blackwell and qutlass_available else "mxfp4",
-        pseudo_quantization=not (is_blackwell and qutlass_available)  # Pseudo for non-Blackwell or missing qutlass
-    )
-    load_kwargs["quantization_config"] = quantization_config
-    if not is_blackwell or not qutlass_available:
-        print(f"Warning: FP4 quantization on {gpu_name} uses pseudo-quantization (no speedup, emulates FP4). "
-              "Full FP4 speed requires Blackwell GPU with qutlass.")
+    if device == "cpu":
+        print(f"Error: FP4 quantization is not supported on CPU. Falling back to non-quantized {args.precision.upper()}.")
+        load_kwargs["device_map"] = "auto"
+        quantization_status = "none"
+    else:
+        load_kwargs["device_map"] = {"": device}  # Explicit device_map for FP4
+        if not is_blackwell or not qutlass_available:
+            use_pseudo_quantization = True
+            print(f"Warning: FP4 quantization on {gpu_name} uses pseudo-quantization (no speedup, emulates FP4). "
+                  "Full FP4 speed requires Blackwell GPU with qutlass installed (see above for installation command).")
+        try:
+            load_kwargs["quantization_config"] = FPQuantConfig(
+                forward_dtype="nvfp4" if is_blackwell and qutlass_available else "mxfp4",
+                pseudo_quantization=use_pseudo_quantization
+            )
+            quantization_status = "fp4" if is_blackwell and qutlass_available else "fp4 (pseudo)"
+        except (ImportError, ValueError) as e:
+            print(f"Error: Failed to load model with FP4 quantization: {e}. Falling back to non-quantized {args.precision.upper()}.")
+            print("To resolve, install qutlass with: 'cd /home/nvidia/benchmarking/gpu/qutlass && pip install --no-build-isolation . -v --global-option=\"--cmake-args=-DCUTLASS_NVCC_ARCHS=120 -DCMAKE_CUDA_ARCHITECTURES=120\"'")
+            load_kwargs.pop("quantization_config", None)
+            load_kwargs["dtype"] = dtype
+            load_kwargs["device_map"] = {"": device} if device.startswith("cuda") else "auto"
+            quantization_status = "none"
 
-# Load model with fallback to non-quantized if FP4 fails
+# Load model
 try:
     model = AutoModelForCausalLM.from_pretrained(model_name, **load_kwargs)
-except ImportError as e:
-    if args.quantization == "fp4":
-        print(f"Error: Failed to load model with FP4 quantization: {e}. Falling back to non-quantized {args.precision.upper()}.")
-        load_kwargs.pop("quantization_config", None)  # Remove quantization config
-        load_kwargs["dtype"] = dtype  # Use base precision
-        model = AutoModelForCausalLM.from_pretrained(model_name, **load_kwargs)
-        args.quantization = "none"  # Update quantization status
-    else:
-        raise e  # Rethrow if not FP4-related
+except ValueError as e:
+    print(f"Error loading model: {e}. Falling back to non-quantized {args.precision.upper()} with manual device placement.")
+    load_kwargs.pop("quantization_config", None)
+    load_kwargs["dtype"] = dtype
+    load_kwargs["device_map"] = {"": device} if device.startswith("cuda") else "auto"
+    model = AutoModelForCausalLM.from_pretrained(model_name, **load_kwargs)
+    quantization_status = "none"
 
-if device.startswith("cuda"):
+if device.startswith("cuda") and "device_map" not in load_kwargs:
     model = model.to(device)
 model.eval()
 
@@ -112,10 +128,10 @@ print("|       Model Details       |")
 print("+--------------------------+\n")
 print(f"Model: {model_name}")
 print(f"Number of Parameters: {num_params:,}")
-print(f"Base Precision: {args.precision.upper()} (torch.{dtype})")
-print(f"Quantization: {args.quantization.upper() if args.quantization != 'none' else 'None'}")
-if args.quantization == "fp4":
-    mem_savings = " ~4x vs FP32" if args.quantization == "fp4" else ""
+print(f"Base Precision: {args.precision.upper()} (torch.{str(dtype).split('.')[-1]})")
+print(f"Quantization: {quantization_status.upper() if quantization_status != 'none' else 'None'}")
+if quantization_status.startswith("fp4"):
+    mem_savings = " ~4x vs FP32" if quantization_status == "fp4" else " (emulated, no memory savings)"
     print(f"Effective Precision: FP4{mem_savings} (Quality: Near-lossless on LLMs)")
 print(f"GPU Architecture: {gpu_name} ({'Blackwell (FP4-optimized)' if is_blackwell else 'H100-compatible (FP16/FP32)'})")
 print(f"Device: {gpu_name if device.startswith('cuda') else device}")
@@ -129,7 +145,7 @@ inputs = tokenizer(
 
 # Warmup (increased for quantized models)
 with torch.no_grad():
-    for _ in range(10 if args.quantization == "fp4" else 5):
+    for _ in range(10 if quantization_status.startswith("fp4") else 5):
         _ = model.generate(**inputs, max_new_tokens=10, do_sample=False)
 torch.cuda.synchronize()
 
