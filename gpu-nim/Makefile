@@ -1,6 +1,7 @@
 .PHONY: setup
 setup:
 	@echo "NGC_API_KEY=$$(cat ~/.secrets/ngc-api-key.txt)" > .env
+	@cat ~/.secrets/ngc-api-key.txt | docker login nvcr.io -u '$$oauthtoken' --password-stdin
 
 .PHONY: status
 status:
