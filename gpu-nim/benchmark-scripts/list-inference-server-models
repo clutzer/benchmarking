@@ -1,0 +1,3 @@
+#!/bin/sh
+
+curl -s http://inference-server:8000/v1/models | jq -r '.data[].id'

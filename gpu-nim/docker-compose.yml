@@ -1,0 +1,55 @@
+services:
+
+  inference-server:
+    image: nvcr.io/nim/meta/llama-3.3-70b-instruct:1.13
+    container_name: inference-server
+    restart: unless-stopped
+    environment:
+      NGC_API_KEY: ${NGC_API_KEY}
+      NIM_MODEL_PROFILE: 63cb364a1193b470fa18c1a21ea74751af7997ad079b603ef5d64520534af94a
+        #user: "${USER_ID}:${GROUP_ID}"
+    shm_size: "16GB"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - "${LOCAL_NIM_CACHE:-./nim-cache}:/opt/nim/.cache"
+    healthcheck:
+      # Executed within the context of this container itself:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/models"]
+      interval: 30s      # Check every 30 seconds
+      timeout: 10s       # Fail if no response in 10s
+      retries: 5         # Retry up to 5 times before marking unhealthy
+      start_period: 60s  # Ignore failures for the first 60s (gives startup buffer)
+
+  benchmark-server:
+    image: nvcr.io/nvidia/tritonserver:25.09-py3-sdk
+    container_name: benchmark-server
+    restart: unless-stopped
+    environment:
+      NGC_API_KEY: ${NGC_API_KEY}
+    volumes:
+      - ./benchmark-scripts:/benchmark-scripts
+      - "${HOME}/.secrets:/secrets"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    depends_on:
+      inference-server:
+        condition: service_healthy
+    # Optional: communicate using service name 'inference-server' and port 8000
+    command: >
+      bash -c "echo 'Benchmark container ready. Connect to inference-server:8000' && tail -f /dev/null"
+
+networks:
+  default:
+    name: benchmark-net
+
