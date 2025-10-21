@@ -8,7 +8,7 @@ import argparse
 import subprocess
 import re
 
-def load_profile_cache(cache_file="nim_profile_cache.json"):
+def load_profile_cache(cache_file="nim_profile_cache.json", verbose=False):
     """Load the Profile ID to human-readable name mapping from cache."""
     cache_file = Path(cache_file)
     if cache_file.exists():
@@ -16,20 +16,23 @@ def load_profile_cache(cache_file="nim_profile_cache.json"):
             with cache_file.open('r') as f:
                 return json.load(f)
         except (json.JSONDecodeError, IOError) as e:
-            print(f"Warning: Failed to load cache file {cache_file}: {e}. Starting with empty cache.")
+            if verbose:
+                print(f"Warning: Failed to load cache file {cache_file}: {e}. Starting with empty cache.")
             return {}
     return {}
 
-def save_profile_cache(profiles, cache_file="nim_profile_cache.json"):
+def save_profile_cache(profiles, cache_file="nim_profile_cache.json", verbose=False):
     """Save the Profile ID to human-readable name mapping to cache."""
     try:
         with open(cache_file, 'w') as f:
             json.dump(profiles, f, indent=2)
-        print(f"Updated profile cache at {cache_file}")
+        if verbose:
+            print(f"Updated profile cache at {cache_file}")
     except IOError as e:
-        print(f"Warning: Failed to save cache file {cache_file}: {e}")
+        if verbose:
+            print(f"Warning: Failed to save cache file {cache_file}: {e}")
 
-def fetch_profile_id():
+def fetch_profile_id(verbose=False):
     """Fetch the NIM_MODEL_PROFILE (Profile ID) from the inference-server container."""
     try:
         result = subprocess.run(
@@ -42,16 +45,19 @@ def fetch_profile_id():
         if profile_id:
             return profile_id
         else:
-            print("Warning: NIM_MODEL_PROFILE is empty in the container.")
+            if verbose:
+                print("Warning: NIM_MODEL_PROFILE is empty in the container.")
             return None
     except subprocess.CalledProcessError as e:
-        print(f"Warning: Failed to fetch NIM_MODEL_PROFILE from container: {e}. Using 'Unknown'.")
+        if verbose:
+            print(f"Warning: Failed to fetch NIM_MODEL_PROFILE from container: {e}. Using 'Unknown'.")
         return None
     except FileNotFoundError:
-        print("Warning: 'docker' command not found. Using 'Unknown'.")
+        if verbose:
+            print("Warning: 'docker' command not found. Using 'Unknown'.")
         return None
 
-def fetch_model_profiles_output():
+def fetch_model_profiles_output(verbose=False):
     """Fetch the raw output of 'list-model-profiles' from the container."""
     try:
         result = subprocess.run(
@@ -62,10 +68,12 @@ def fetch_model_profiles_output():
         )
         return result.stdout
     except subprocess.CalledProcessError as e:
-        print(f"Warning: Failed to fetch list-model-profiles: {e}. Cannot map Profile ID.")
+        if verbose:
+            print(f"Warning: Failed to fetch list-model-profiles: {e}. Cannot map Profile ID.")
         return None
     except FileNotFoundError:
-        print("Warning: 'docker' command not found. Cannot map Profile ID.")
+        if verbose:
+            print("Warning: 'docker' command not found. Cannot map Profile ID.")
         return None
 
 def parse_model_profiles(output):
@@ -82,15 +90,15 @@ def parse_model_profiles(output):
         truncated_name = profile_name.split(':', 1)[0]
         profiles[profile_id] = truncated_name
 
-    if not profiles:
+    if not profiles and verbose:
         print("Warning: No profiles parsed from list-model-profiles output.")
 
     return profiles
 
-def get_nim_model_profile(use_docker=True, override=None, cache_file="nim_profile_cache.json"):
+def get_nim_model_profile(use_docker=True, override=None, cache_file="nim_profile_cache.json", verbose=False):
     """Get the human-readable NIM Model Profile, mapping from ID if needed."""
     # Load cache
-    profile_cache = load_profile_cache(cache_file)
+    profile_cache = load_profile_cache(cache_file, verbose)
 
     if override:
         # Truncate override if it contains a colon
@@ -99,33 +107,37 @@ def get_nim_model_profile(use_docker=True, override=None, cache_file="nim_profil
     if not use_docker:
         return "Unknown"
 
-    profile_id = fetch_profile_id()
+    profile_id = fetch_profile_id(verbose)
     if not profile_id:
         return "Unknown"
 
     # If it's already a long descriptive name (not a hash), truncate and use it
     if len(profile_id) > 64 or not re.match(r'^[a-f0-9]{64}$', profile_id):
-        print(f"Using provided NIM_MODEL_PROFILE directly: {profile_id}")
+        if verbose:
+            print(f"Using provided NIM_MODEL_PROFILE directly: {profile_id}")
         return profile_id.split(':', 1)[0]
 
     # Check cache first
     if profile_id in profile_cache:
-        print(f"Using cached profile for ID '{profile_id}': {profile_cache[profile_id]}")
+        if verbose:
+            print(f"Using cached profile for ID '{profile_id}': {profile_cache[profile_id]}")
         return profile_cache[profile_id]
 
     # Fetch and parse list-model-profiles to map ID
-    output = fetch_model_profiles_output()
+    output = fetch_model_profiles_output(verbose)
     profiles_map = parse_model_profiles(output)
 
     if profile_id in profiles_map:
         human_readable = profiles_map[profile_id]
         # Update cache with new mapping
         profile_cache[profile_id] = human_readable
-        save_profile_cache(profile_cache, cache_file)
-        print(f"Mapped Profile ID '{profile_id}' to: {human_readable}")
+        save_profile_cache(profile_cache, cache_file, verbose)
+        if verbose:
+            print(f"Mapped Profile ID '{profile_id}' to: {human_readable}")
         return human_readable
     else:
-        print(f"Warning: Profile ID '{profile_id}' not found in list-model-profiles. Using raw ID.")
+        if verbose:
+            print(f"Warning: Profile ID '{profile_id}' not found in list-model-profiles. Using raw ID.")
         return profile_id
 
 def extract_metrics(json_file, nim_profile, use_case):
@@ -201,6 +213,11 @@ def main():
         default=None,
         help="Optional: Hardcode the NIM Model Profile (Profile ID or full name; overrides Docker fetch)."
     )
+    parser.add_argument(
+        "--verbose",
+        action='store_true',
+        help="Enable verbose output for debugging."
+    )
     args = parser.parse_args()
 
     # Validate artifact directory
@@ -210,9 +227,11 @@ def main():
         return
 
     # Fetch or use NIM Model Profile (with mapping and cache)
-    print("Fetching NIM Model Profile...")
-    nim_profile = get_nim_model_profile(use_docker=True, override=args.nim_profile)
-    print(f"Using NIM Model Profile: {nim_profile}")
+    if args.verbose:
+        print("Fetching NIM Model Profile...")
+    nim_profile = get_nim_model_profile(use_docker=True, override=args.nim_profile, verbose=args.verbose)
+    if args.verbose:
+        print(f"Using NIM Model Profile: {nim_profile}")
 
     # Collate benchmarks and print results
     df = collate_benchmarks(artifact_dir, nim_profile)
