@@ -2,6 +2,8 @@
 setup:
 	@echo "NGC_API_KEY=$$(cat ~/.secrets/ngc-api-key.txt)" > .env
 	@cat ~/.secrets/ngc-api-key.txt | docker login nvcr.io -u '$$oauthtoken' --password-stdin
+	@mkdir -p nim-cache
+	@chmod g+s nim-cache
 
 .PHONY: status
 status:
@@ -26,3 +28,7 @@ list-inference-server-models:
 run-baseline-benchmark:
 	@docker compose exec benchmark-server /benchmark-scripts/baseline.sh
 
+.PHONY: list-nim-profiles
+list-nim-profiles:
+	@docker run --rm nvcr.io/nim/meta/llama-3.3-70b-instruct:1.13 \
+	  list-model-profiles
