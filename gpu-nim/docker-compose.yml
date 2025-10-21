@@ -6,8 +6,7 @@ services:
     restart: unless-stopped
     environment:
       NGC_API_KEY: ${NGC_API_KEY}
-      NIM_MODEL_PROFILE: 63cb364a1193b470fa18c1a21ea74751af7997ad079b603ef5d64520534af94a
-        #user: "${USER_ID}:${GROUP_ID}"
+      NIM_MODEL_PROFILE: ${NIM_MODEL_PROFILE:-63cb364a1193b470fa18c1a21ea74751af7997ad079b603ef5d64520534af94a}
     shm_size: "16GB"
     deploy:
       resources:
