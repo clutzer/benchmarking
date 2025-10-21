@@ -36,6 +36,7 @@ runBenchmark() {
 
         genai-perf profile \
             -m $MODEL \
+	    --artifact-dir /artifacts/momark1 \
             --endpoint-type chat \
             --streaming \
             -u inference-server:8000 \

@@ -4,6 +4,7 @@ setup:
 	@cat ~/.secrets/ngc-api-key.txt | docker login nvcr.io -u '$$oauthtoken' --password-stdin
 	@mkdir -p nim-cache
 	@chmod g+s nim-cache
+	@-mkdir benchmark-artifacts
 
 .PHONY: status
 status:
@@ -27,6 +28,10 @@ list-inference-server-models:
 .PHONY: run-baseline-benchmark
 run-baseline-benchmark:
 	@docker compose exec benchmark-server /benchmark-scripts/baseline.sh
+
+.PHONY: run-smoketest-benchmark
+run-smoketest-benchmark:
+	@docker compose exec benchmark-server /benchmark-scripts/smoketest.sh
 
 .PHONY: list-nim-profiles
 list-nim-profiles:

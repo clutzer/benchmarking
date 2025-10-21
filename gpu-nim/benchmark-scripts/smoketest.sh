@@ -31,6 +31,7 @@ runBenchmark() {
 
         genai-perf profile \
             -m $MODEL \
+	    --artifact-dir /artifacts/smoketest \
             --endpoint-type chat \
             --streaming \
             -u inference-server:8000 \

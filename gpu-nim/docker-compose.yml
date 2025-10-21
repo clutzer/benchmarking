@@ -20,10 +20,10 @@ services:
     healthcheck:
       # Executed within the context of this container itself:
       test: ["CMD", "curl", "-f", "http://localhost:8000/v1/models"]
-      interval: 30s      # Check every 30 seconds
-      timeout: 10s       # Fail if no response in 10s
-      retries: 5         # Retry up to 5 times before marking unhealthy
-      start_period: 60s  # Ignore failures for the first 60s (gives startup buffer)
+      interval: 30s
+      timeout: 5s
+      retries: 20
+      start_period: 20s  # Ignore failures for the first 60s (gives startup buffer)
 
   benchmark-server:
     image: nvcr.io/nvidia/tritonserver:25.09-py3-sdk
@@ -33,6 +33,7 @@ services:
       NGC_API_KEY: ${NGC_API_KEY}
     volumes:
       - ./benchmark-scripts:/benchmark-scripts
+      - ./benchmark-artifacts:/artifacts
       - "${HOME}/.secrets:/secrets"
     deploy:
       resources:

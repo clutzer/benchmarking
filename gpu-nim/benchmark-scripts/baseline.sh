@@ -33,6 +33,7 @@ runBenchmark() {
 
         genai-perf profile \
             -m $MODEL \
+	    --artifact-dir /artifacts/baseline \
             --endpoint-type chat \
             --streaming \
             -u inference-server:8000 \
