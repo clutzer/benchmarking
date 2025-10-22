@@ -7,22 +7,23 @@ hf auth login --token $HF_TOKEN
 declare -A useCases
  
 # Populate the array with use case descriptions and their specified input/output lengths
-useCases["Translation"]="200/200"
-#useCases["Text classification"]="200/5"
-#useCases["Text summary"]="1000/200"
-#useCases["Code generation"]="200/1000"
+useCases["translation"]="200/200"
+#useCases["text_classification"]="200/5"
+#useCases["text_summary"]="1000/200"
+#useCases["code_generation"]="200/1000"
  
+rm -rf /artifacts/smoketest/*
+
 # Function to execute genAI-perf with the input/output lengths as arguments
 runBenchmark() {
     local description="$1"
     local lengths="${useCases[$description]}"
     IFS='/' read -r inputLength outputLength <<< "$lengths"
  
-    local concurrencies=(100)
-
     echo "Running genAI-perf for $description with input length $inputLength and output length $outputLength"
     #Runs
-    for concurrency in $concurrencies; do
+    #for concurrency in 1 5 10 25 50 100 150 200; do
+    for concurrency in 1 100; do
  
         local INPUT_SEQUENCE_LENGTH=$inputLength
         local INPUT_SEQUENCE_STD=0
@@ -30,13 +31,13 @@ runBenchmark() {
         local CONCURRENCY=$concurrency
         local MODEL=$(curl -s http://inference-server:8000/v1/models | jq -r '.data[0].id')
         # Recommended measurement intervals by model...
-	local MEASUREMENT_INTERVAL_8B=30000
-	local MEASUREMENT_INTERVAL_70B=100000
-        local MEASUREMENT_INTERVAL=30000
+        local MEASUREMENT_INTERVAL_8B=30000
+        local MEASUREMENT_INTERVAL_70B=100000
+        local MEASUREMENT_INTERVAL=60000
          
         genai-perf profile \
             -m $MODEL \
-	    --artifact-dir /artifacts/smoketest \
+            --artifact-dir /artifacts/smoketest \
             --concurrency $CONCURRENCY \
             --measurement-interval ${MEASUREMENT_INTERVAL} \
             --stability-percentage 10 \
