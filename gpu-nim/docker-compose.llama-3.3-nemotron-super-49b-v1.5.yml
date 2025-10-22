@@ -1,0 +1,11 @@
+services:
+  inference-server:
+    # https://docs.nvidia.com/nim/large-language-models/latest/supported-models.html#llama-3-3-nemotron-super-49b-v1-5
+    image: nvcr.io/nim/nvidia/llama-3.3-nemotron-super-49b-v1.5:latest
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
