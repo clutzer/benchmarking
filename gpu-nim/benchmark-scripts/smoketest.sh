@@ -1,5 +1,8 @@
-#!/bin/sh
+#!/bin/bash
 # vim: set ts=4 sw=4 et:
+
+HF_TOKEN=$(cat /secrets/hf-token.txt)
+hf auth login --token $HF_TOKEN
 
 declare -A useCases
  
