@@ -31,7 +31,7 @@ run-baseline-benchmark:
 
 .PHONY: run-smoketest-benchmark
 run-smoketest-benchmark:
-	@docker compose exec benchmark-server /benchmark-scripts/smoketest.sh
+	@time docker compose exec benchmark-server /benchmark-scripts/smoketest.sh
 
 .PHONY: list-nim-profiles
 list-nim-profiles:
