@@ -27,7 +27,7 @@ list-inference-server-models:
 
 .PHONY: run-baseline-benchmark
 run-baseline-benchmark:
-	@docker compose exec benchmark-server /benchmark-scripts/baseline.sh
+	@time docker compose exec benchmark-server /benchmark-scripts/baseline.sh
 
 .PHONY: run-smoketest-benchmark
 run-smoketest-benchmark:
