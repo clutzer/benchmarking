@@ -17,7 +17,7 @@ runBenchmark() {
     local lengths="${useCases[$description]}"
     IFS='/' read -r inputLength outputLength <<< "$lengths"
  
-    local concurrencies=(1 1 5 10 25 50 100 150 200)
+    local concurrencies=(1 5 10 25 50 100 150 200)
 
     echo "Running genAI-perf for $description with input length $inputLength and output length $outputLength"
     #Runs
