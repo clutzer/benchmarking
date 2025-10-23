@@ -22,7 +22,7 @@ This benchmarking suite requires Docker.  The most reliable way to do this is to
 It's critical to select an appropriate NIM model profile and set the `NIM_MODEL_PROFILE` environment variable accordingly.  We don't go into detail here on what these are, but suffice to say they have to be correctly set for your hardware and environment.  Use the following `make` command to get a list of supported profiles for you system:
 
 ```
-make list-nim-profiles
+make list-model-profiles
 ```
 
 Then, look for output like the following:
