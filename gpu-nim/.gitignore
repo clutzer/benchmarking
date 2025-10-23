@@ -1,3 +1,4 @@
 .env
 benchmark-artifacts/
 nim-cache/
+docker-compose.override.yml
