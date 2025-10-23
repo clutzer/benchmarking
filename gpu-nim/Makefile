@@ -4,7 +4,7 @@ setup:
 	@echo "HF_TOKEN=$$(cat ~/.secrets/hf-token.txt)" >> .env
 	@cat ~/.secrets/ngc-api-key.txt | docker login nvcr.io -u '$$oauthtoken' --password-stdin
 	@mkdir -p nim-cache
-	@chown nvidia:nvidoa nim-cache
+	@chown nvidia:nvidia nim-cache
 	@chmod g+ws nim-cache
 	@-mkdir benchmark-artifacts
 
