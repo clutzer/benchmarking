@@ -49,6 +49,47 @@ services:
     command: >
       bash -c "echo 'Benchmark container ready. Connect to inference-server:8000' && tail -f /dev/null"
 
+  list-model-profiles:
+    image: nvcr.io/nim/meta/llama-3.3-70b-instruct:1.13
+    command: list-model-profiles
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+      restart_policy:
+        condition: none # Mimics --rm by not restarting the container
+
+  nvidia-smi:
+    image: nvcr.io/nim/meta/llama-3.3-70b-instruct:1.13
+    command: nvidia-smi
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+      restart_policy:
+        condition: none # Mimics --rm by not restarting the container
+
+  bash:
+    image: nvcr.io/nim/meta/llama-3.3-70b-instruct:1.13
+    command: bash
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+      restart_policy:
+        condition: none # Mimics --rm by not restarting the container
+    volumes:
+      - "${LOCAL_NIM_CACHE:-./nim-cache}:/opt/nim/.cache"
+
 networks:
   default:
     name: benchmark-net
