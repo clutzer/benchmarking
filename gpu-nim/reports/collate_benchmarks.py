@@ -140,7 +140,7 @@ def get_nim_model_profile(use_docker=True, override=None, cache_file="nim_profil
             print(f"Warning: Profile ID '{profile_id}' not found in list-model-profiles. Using raw ID.")
         return profile_id
 
-def extract_metrics(json_file, nim_profile, use_case):
+def extract_metrics(json_file, nim_profile, use_case, concurrency):
     """Extract relevant metrics from a genai_perf JSON file."""
     try:
         with open(json_file, 'r') as f:
@@ -154,6 +154,7 @@ def extract_metrics(json_file, nim_profile, use_case):
             'Model': model,
             'NIM Model Profile': nim_profile,
             'Use Case': use_case,
+            'Concurrency': concurrency,
             'TTFT (ms)': round(ttft, 2),
             'TPS (tokens/sec)': round(tps, 2)
         }
@@ -172,6 +173,10 @@ def collate_benchmarks(artifact_dir, nim_profile):
         if 'concurrency' not in dir_name:
             continue
 
+        # Extract concurrency from directory name (e.g., concurrency200 -> 200)
+        match = re.search(r'concurrency(\d+)', dir_name)
+        concurrency = int(match.group(1)) if match else None
+
         # Process each genai_perf JSON file
         for file in files:
             if file.endswith('_genai_perf.json'):
@@ -180,15 +185,15 @@ def collate_benchmarks(artifact_dir, nim_profile):
                 json_file = os.path.join(root, file)
 
                 # Extract metrics
-                metrics = extract_metrics(json_file, nim_profile, use_case)
+                metrics = extract_metrics(json_file, nim_profile, use_case, concurrency)
                 if metrics:
                     results.append(metrics)
 
     # Create DataFrame
     df = pd.DataFrame(results)
-    # Sort by Model, NIM Model Profile, and Use Case for readability
+    # Sort by Model, NIM Model Profile, Concurrency, and Use Case for readability
     if not df.empty:
-        df = df.sort_values(['Model', 'NIM Model Profile', 'Use Case'])
+        df = df.sort_values(['Model', 'NIM Model Profile', 'Concurrency', 'Use Case'])
     return df
 
 def print_markdown_table(df):
