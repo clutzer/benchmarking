@@ -21,9 +21,17 @@ stop:
 .PHONY: getting-started
 getting-started: setup up status
 
-.PHONY: list-inference-server-models
-list-inference-server-models:
+.PHONY: list-model-profiles
+list-model-profiles:
+	@docker compose up list-model-profiles
+
+.PHONY: list-models
+list-models:
 	@docker compose exec benchmark-server /benchmark-scripts/list-inference-server-models
+
+#
+# Benchmarks
+#
 
 .PHONY: run-baseline-benchmark
 run-baseline-benchmark:
@@ -33,7 +41,3 @@ run-baseline-benchmark:
 run-smoketest-benchmark:
 	@time docker compose exec benchmark-server /benchmark-scripts/smoketest.sh
 
-.PHONY: list-nim-profiles
-list-nim-profiles:
-	@docker run --rm nvcr.io/nim/meta/llama-3.3-70b-instruct:1.13 \
-	  list-model-profiles
