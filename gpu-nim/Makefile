@@ -1,9 +1,11 @@
 .PHONY: setup
 setup:
 	@echo "NGC_API_KEY=$$(cat ~/.secrets/ngc-api-key.txt)" > .env
+	@echo "HF_TOKEN=$$(cat ~/.secrets/hf-token.txt)" >> .env
 	@cat ~/.secrets/ngc-api-key.txt | docker login nvcr.io -u '$$oauthtoken' --password-stdin
 	@mkdir -p nim-cache
-	@chmod g+s nim-cache
+	@chown nvidia:nvidoa nim-cache
+	@chmod g+ws nim-cache
 	@-mkdir benchmark-artifacts
 
 .PHONY: status
@@ -28,6 +30,10 @@ list-model-profiles:
 .PHONY: list-models
 list-models:
 	@docker compose exec benchmark-server /benchmark-scripts/list-inference-server-models
+
+.PHONY: truncate-logs
+truncate-logs:
+	truncate -s 0 `docker inspect --format='{{.LogPath}}' inference-server`
 
 #
 # Benchmarks

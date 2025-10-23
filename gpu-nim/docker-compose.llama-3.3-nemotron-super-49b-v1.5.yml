@@ -1,9 +1,13 @@
 services:
   inference-server:
     # https://docs.nvidia.com/nim/large-language-models/latest/supported-models.html#llama-3-3-nemotron-super-49b-v1-5
+    # https://catalog.ngc.nvidia.com/orgs/nim/teams/nvidia/containers/llama-3.3-nemotron-super-49b-v1.5?version=latest
     # 317edefe0e4f3253972892af7f1f8bb0787c39eaac22e54947bbd21c64c105de (tensorrt_llm-rtx6000_blackwell_sv-fp8-tp1-pp1-throughput-2bb5:10de-93ae1647a06301ebae5535fc2a127f5149c5ffe3f63f99443eac45c342b36bf9-1)
     # 496a3bcf32f7c7e81e59b1c17395d49b6c412dcb9e94d1bd4675c7ab61ed4b8c (tensorrt_llm-rtx6000_blackwell_sv-nvfp4-tp1-pp1-throughput-2bb5:10de-c93c0eb2422047add4d8c0141d90bab8840448b965f75976ac669b97d7934cca-1)
     image: nvcr.io/nim/nvidia/llama-3.3-nemotron-super-49b-v1.5:latest
+    environment:
+      ENABLE_LORA: false
+      MODEL_TOKENIZER_PATH: /tokenizers/
     deploy:
       resources:
         reservations:
@@ -16,6 +20,10 @@ services:
       memlock: -1
       stack: 67108864
 
+  benchmark-server:
+    environment:
+      TOKENIZER: nvidia/llama-3_3-nemotron-super-49b-v1_5
+
   list-model-profiles:
     image: nvcr.io/nim/nvidia/llama-3.3-nemotron-super-49b-v1.5:latest
     ipc: host
@@ -26,3 +34,4 @@ services:
   bash:
     image: nvcr.io/nim/nvidia/llama-3.3-nemotron-super-49b-v1.5:latest
     command: bash
+
