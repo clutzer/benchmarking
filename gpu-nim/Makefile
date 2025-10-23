@@ -42,8 +42,10 @@ truncate-logs:
 .PHONY: run-baseline-benchmark
 run-baseline-benchmark:
 	@time docker compose exec benchmark-server /benchmark-scripts/baseline.sh
+	(cd reports; ./collate_benchmarks.py --artifact-dir ../benchmark-artifacts/baseline/)
 
 .PHONY: run-smoketest-benchmark
 run-smoketest-benchmark:
 	@time docker compose exec benchmark-server /benchmark-scripts/smoketest.sh
+	(cd reports; ./collate_benchmarks.py --artifact-dir ../benchmark-artifacts/smoketest/)
 
