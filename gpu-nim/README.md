@@ -2,6 +2,16 @@
 
 ## Getting Started
 
+### Bootstrap
+
+The very first thing to do on a new system in order to run this benchmarking suite is to bootstrap it.  Do this by running the [bootstrap.sh](bootstrap.sh) script.  This will install some dependencies for installing the NVIDIA driver and creating a Python virtual environment (for report generation).
+
+Make sure you activate the Python virtual environment before running any of the benchmark suites defined in the Makefile (e.g. `make run-smoketest-benchmark`).
+
+### NVIDIA Driver
+
+You must have an NVIDIA driver installed in order to run these benchmarks.  At the time of writing, the `NVIDIA-Linux-x86_64-580.95.05.run` driver was downloaded from NVIDIA's site and installed.
+
 ### Secrets
 
 You must create a ~/.secrets directory on your host with an NGC and Huggingface tokens.  E.g.
@@ -13,9 +23,15 @@ hf-token.txt  ngc-api-key.txt
 
 These secrets are used by both the Makefile to create a docker compose .env as well as by benchmarking scripts to perform `hf auth login` calls.
 
+Note: you may not need a Huggingface credential in all cases so feel free to skip that one if you like.
+
 ### Docker
 
 This benchmarking suite requires Docker.  The most reliable way to do this is to follow the official [Docker instructions](https://docs.docker.com/engine/install/ubuntu/).  At the time of writing (2025) I strongly recommend against using an Ubuntu packaged version.
+
+There are helper scripts in the [docker](docker) sub-directory that will install Docker per the Ubuntu instructions above, as of November 2025 -- your milage may vary.
+
+In addition to installing Docker, you need to enable GPU access in Docker.  The [nvidia](nvidia) directory contains some helper scripts to enable GPU access in Docker as well as perform a functional test to ensure that containers can see the GPU.
 
 ### NIM Model Profiles
 
@@ -53,11 +69,24 @@ export NIM_MODEL_PROFILE=bbbb4a404c66d299bf36015162aae3c73615d39011213ffd5a8cad7
 ``` 
 ### TODO: Prometheus & Grafan
 
+### Start the Containers
+
+At this point you can start the containers.  There is a convenience rule in the Makefile to do this: `make getting-started`.  Note that the `inference-server` container will take a while to become healthy as it has to download the model on first boot.  It may take so long in fact that the `benchmark-server` container times out and fails to start.  This okay, just type `make status` to see the status of the containers, and once the `inference-server` becomes healthy, just type `make up` to start the `benchmark-server`.
+
+At this point you are ready to run benchmarks!
+
 ### Running a Benchmark
 
 The easiest way to run a bench mark is to exec into the `benchmarking-server` container and execute one of the benchmarking scripts.  E.g.
 
 `docker compose exec benchmark-server /benchmark-scripts/baseline.sh`
+
+There are Makefile rules that simply this for you:
+
+* `make run-baseline-benchmark`
+* `make run-smoketest-benchmark`
+
+These Makefile rules also collate the results into a tabular format suitable for pasting into reports.
 
 ## Benchmarking Ecosystem
 
