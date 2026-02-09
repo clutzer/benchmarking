@@ -24,6 +24,8 @@ endif
 
 LIB_PATH=./nccl/build/lib:$(LD_LIBRARY_PATH)
 
+NCCL_HOME ?= $(shell realpath ./nccl/build)
+
 .PHONY: help_all_reduce_perf help_vars
 
 help_all_reduce_perf:
@@ -33,6 +35,7 @@ help_vars:
 	@echo "CUDA_BIN:        $(CUDA_BIN)"
 	@echo "LD_LIBRARY_PATH: $(LIB_PATH)"
 	@echo "MPI_HOME:        $(MPI_HOME)"
+	@echo "NCCL_HOME:       $(NCCL_HOME)"
 
 .PHONY: build-nccl
 build-nccl:
@@ -45,7 +48,7 @@ build-nccl-tests:
 	#sudo apt -y install libopenmpi-dev libnccl-dev
 	echo "MPI_HOME: $(MPI_HOME)"
 	-@git clone https://github.com/NVIDIA/nccl-tests.git
-	(cd nccl-tests; make MPI_HOME=$(MPI_HOME) CUDA_HOME=$(CUDA_HOME) MPI=1)
+	(cd nccl-tests; make MPI_HOME=$(MPI_HOME) CUDA_HOME=$(CUDA_HOME) NCCL_HOME=$(NCCL_HOME) MPI=1)
 
 .PHONY: run-all_reduce_perf-2x-gpu
 run-all_reduce_perf-2x-gpu:
