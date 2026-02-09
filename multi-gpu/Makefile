@@ -52,7 +52,7 @@ build-nccl-tests:
 
 .PHONY: run-all_reduce_perf-2x-gpu
 run-all_reduce_perf-2x-gpu:
-	LD_LIBRARY_PATH=$(LIB_PATH) ./nccl-tests/build/all_reduce_perf -b 8 -e 128M -f 2 -g 2
+	LD_LIBRARY_PATH=$(LIB_PATH) ./nccl-tests/build/all_reduce_perf -b 8 -e 256M -f 2 -g 2
 
 .PHONY: run-mpi-2x-gpu
 run-mpi-2x-gpu:
