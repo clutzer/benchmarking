@@ -1,7 +1,7 @@
 services:
 
   inference-server:
-    image: nvcr.io/nim/meta/llama-3.3-70b-instruct:1.13
+    image: nvcr.io/nim/meta/llama-3.3-70b-instruct:latest
     container_name: inference-server
     restart: unless-stopped
     environment:
@@ -50,7 +50,7 @@ services:
       bash -c "echo 'Benchmark container ready. Connect to inference-server:8000' && tail -f /dev/null"
 
   list-model-profiles:
-    image: nvcr.io/nim/meta/llama-3.3-70b-instruct:1.13
+    image: nvcr.io/nim/meta/llama-3.3-70b-instruct:latest
     command: list-model-profiles
     deploy:
       resources:
@@ -63,7 +63,7 @@ services:
         condition: none # Mimics --rm by not restarting the container
 
   nvidia-smi:
-    image: nvcr.io/nim/meta/llama-3.3-70b-instruct:1.13
+    image: nvcr.io/nim/meta/llama-3.3-70b-instruct:latest
     command: nvidia-smi
     deploy:
       resources:
@@ -76,7 +76,7 @@ services:
         condition: none # Mimics --rm by not restarting the container
 
   bash:
-    image: nvcr.io/nim/meta/llama-3.3-70b-instruct:1.13
+    image: nvcr.io/nim/meta/llama-3.3-70b-instruct:latest
     command: bash
     deploy:
       resources:
