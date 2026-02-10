@@ -1,0 +1,50 @@
+services:
+  inference-server:
+    # https://docs.nvidia.com/nim/large-language-models/latest/supported-models.html#llama-3-1-70b-instruct
+    # https://catalog.ngc.nvidia.com/orgs/nim/teams/meta/containers/llama-3.1-70b-instruct?version=latest
+    # 
+    # 2x GPU, FP8: 1111c7bfcd2bee91ad83ce80cf103e8a5ec0297dbd9a916de14d7f9ca0de1029
+    #
+    # list-model-profiles-1  | MODEL PROFILES
+    # list-model-profiles-1  | - Compatible with system and runnable:
+    # list-model-profiles-1  |   - 1111c7bfcd2bee91ad83ce80cf103e8a5ec0297dbd9a916de14d7f9ca0de1029 (tensorrt_llm-h100_nvl-fp8-tp2-pp1-latency-pytorch-2321:10de-a2f7e40228365789aa9bd34ca675a856145e748ab9caf11686bff60560c206ce-2-true)
+    # list-model-profiles-1  |   - 579063c7e015521b7e3e6dc0f73ec6798eccfe36d70b9bcae1ec78d117cabadc (tensorrt_llm-h100_nvl-fp8-tp1-pp1-throughput-pytorch-2321:10de-7361dd5e32b4350fdcde279b4fa037e18c70cfcbbdf0ecf5964ede078b60337c-1-true)
+    # list-model-profiles-1  |   - cda99c3e2a78ca7a88fbb8a079849c30aad5284542fd3889e1490e63403bd363 (tensorrt_llm-h100_nvl-bf16-tp2-pp1-throughput-pytorch-2321:10de-001d450f61930d4a7dce5af7b4ca4670d50c6f2e87eeb7ca79ba1a877465549b-2-true)
+    # list-model-profiles-1  |   - 6de916160575107c5bc2103c297f5b014b7f648ba782821c6aeac1988bc9383b (vllm-bf16-tp2-pp1-f84c973db3fd199e8a569751f842cb0d63702aced4f9da15180d6c528184981e)
+    # list-model-profiles-1  |   - With LoRA support:
+    # list-model-profiles-1  |     - e903059312e070b08419510b33527b58e609ad99a8b0cc5bd533802c72c5d742 (tensorrt_llm-h100_nvl-fp8-tp1-pp1-throughput-lora-lora-pytorch-2321:10de-e18607abab19be12345251322a39abcd0ed5bc3bfbb53c1320cdb6e0485e903a-1-true)
+    # list-model-profiles-1  |     - 71f96239015b716fdc32b1780f8ef8d3e8cf35f24e07373bc05b320eb77ecdb0 (vllm-bf16-tp2-pp1-lora-32-f84c973db3fd199e8a569751f842cb0d63702aced4f9da15180d6c528184981e)
+    # list-model-profiles-1  | - Compilable to TRT-LLM using just-in-time compilation of HF models to TRTLLM engines: <None>
+    # 
+    image: nvcr.io/nim/meta/llama-3.1-70b-instruct:latest
+    environment:
+      ENABLE_LORA: false
+      MODEL_TOKENIZER_PATH: /tokenizers/
+      NIM_MODEL_PROFILE: ${NIM_MODEL_PROFILE:-1111c7bfcd2bee91ad83ce80cf103e8a5ec0297dbd9a916de14d7f9ca0de1029}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    ipc: host
+    ulimits:
+      memlock: -1
+      stack: 67108864
+
+  benchmark-server:
+    environment:
+      TOKENIZER: meta-llama/llama-3.1-8B-Instruct
+
+  list-model-profiles:
+    image: nvcr.io/nim/meta/llama-3.1-70b-instruct:latest
+    ipc: host
+    ulimits:
+      memlock: -1
+      stack: 67108864
+
+  bash:
+    image: nvcr.io/nim/meta/llama-3.1-70b-instruct:latest
+    command: bash
+
