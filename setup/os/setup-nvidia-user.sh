@@ -53,3 +53,28 @@ else
     exit 1
 fi
 
+# 4. Add nvidia user to sudo
+SUDOERS_FILE="/etc/sudoers.d/${USER_NAME}-nopasswd"
+
+if [[ $EUID -ne 0 ]]; then
+  echo "This script must be run as root."
+  exit 1
+fi
+
+TMP_FILE="$(mktemp)"
+
+# Create sudoers rule
+echo "${USER_NAME} ALL=(ALL) NOPASSWD:ALL" > "$TMP_FILE"
+
+# Validate with visudo
+if visudo -cf "$TMP_FILE"; then
+    echo "Validation passed. Installing sudoers file..."
+    install -m 0440 "$TMP_FILE" "$SUDOERS_FILE"
+    echo "Created $SUDOERS_FILE"
+else
+    echo "visudo validation failed. Not installing."
+    rm -f "$TMP_FILE"
+    exit 1
+fi
+
+rm -f "$TMP_FILE"
