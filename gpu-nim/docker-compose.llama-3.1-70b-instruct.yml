@@ -20,7 +20,10 @@ services:
     environment:
       ENABLE_LORA: false
       MODEL_TOKENIZER_PATH: /tokenizers/
-      NIM_MODEL_PROFILE: ${NIM_MODEL_PROFILE:-1111c7bfcd2bee91ad83ce80cf103e8a5ec0297dbd9a916de14d7f9ca0de1029}
+      # 2x H100 NVL
+      #NIM_MODEL_PROFILE: ${NIM_MODEL_PROFILE:-1111c7bfcd2bee91ad83ce80cf103e8a5ec0297dbd9a916de14d7f9ca0de1029}
+      # 2x RTX PRO 6000 Blackwell Server Edition
+      NIM_MODEL_PROFILE: ${NIM_MODEL_PROFILE:-81ec37b82d7824620f03486dc84ae79a966512b6c2a54b6b400e222103a78c03}
     deploy:
       resources:
         reservations:
