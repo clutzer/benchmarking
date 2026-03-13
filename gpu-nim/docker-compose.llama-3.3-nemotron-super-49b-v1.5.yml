@@ -2,12 +2,24 @@ services:
   inference-server:
     # https://docs.nvidia.com/nim/large-language-models/latest/supported-models.html#llama-3-3-nemotron-super-49b-v1-5
     # https://catalog.ngc.nvidia.com/orgs/nim/teams/nvidia/containers/llama-3.3-nemotron-super-49b-v1.5?version=latest
-    # 317edefe0e4f3253972892af7f1f8bb0787c39eaac22e54947bbd21c64c105de (tensorrt_llm-rtx6000_blackwell_sv-fp8-tp1-pp1-throughput-2bb5:10de-93ae1647a06301ebae5535fc2a127f5149c5ffe3f63f99443eac45c342b36bf9-1)
-    # 496a3bcf32f7c7e81e59b1c17395d49b6c412dcb9e94d1bd4675c7ab61ed4b8c (tensorrt_llm-rtx6000_blackwell_sv-nvfp4-tp1-pp1-throughput-2bb5:10de-c93c0eb2422047add4d8c0141d90bab8840448b965f75976ac669b97d7934cca-1)
+    # list-model-profiles-1  | - Compatible with system and runnable:
+    # list-model-profiles-1  |   - 528fb89432d285acafa908147aa3d05a7e5018830312ca95bd9d2661fb38889f (tensorrt_llm-rtx6000_blackwell_sv-fp8-tp2-pp1-latency-pytorch-2bb5:10de-44877f70c6fbaa6fb074b5027f7e3c1c004b419228be8e85e32e65f66e68e80b-2-true)
+    # list-model-profiles-1  |   - 1cafe40d906fd2c1f82cdcb56d141212826ad4521124276ee77611e776f1f04a (tensorrt_llm-rtx6000_blackwell_sv-fp8-tp1-pp1-throughput-pytorch-2bb5:10de-603587f8c487b7440b2a14a89044654ad141f072432604570c5cc8eef48f8bf4-1-true)
+    # list-model-profiles-1  |   - b6477c728501751ed583372681242e25ba58d34109b1b56b7791eb960a112d95 (tensorrt_llm-rtx6000_blackwell_sv-nvfp4-tp2-pp1-latency-pytorch-2bb5:10de-c4883a142a73b8da3d4cfdd429ac89661e757e093780e311a94099ce32bd6cbb-2-true)
+    # list-model-profiles-1  |   - 73ea7038053e5e103fd92da955a590dad96cdbe1b1aa957049b714f747e014d7 (tensorrt_llm-rtx6000_blackwell_sv-nvfp4-tp1-pp1-throughput-pytorch-2bb5:10de-42e44268091cf63ea2cfb452bd23e66cbe53b5b5489dd2be708340325deea281-1-true)
+    # list-model-profiles-1  |   - 0b3ad2373223298a451162e87c2497f44e037f023d80a5dd875b0ee6843f3d18 (vllm-fp8-tp1-pp1-d39748efeda0af645d1228c525a10aad96f634d5fedf197d2440f2694e1d085d)
+    # list-model-profiles-1  |   - 5ba1d99be5cc097c36d7a002ceb4b00538009678f552df2a9c7bed8911e1ff99 (vllm-bf16-tp2-pp1-fb5a60bf24e3da546cea1b5779c1db1394f0f2416e00e0c808eb9c3df6e818ba)
+    # list-model-profiles-1  |   - 1a0ed308427d7e99e47fc659153f06d374e8d3c8850df0b97ef4ebe44a7f4bd8 (vllm-bf16-tp1-pp1-fb5a60bf24e3da546cea1b5779c1db1394f0f2416e00e0c808eb9c3df6e818ba)
+    # list-model-profiles-1  |   - e9cc0c5ea49283a493a0b18a05a97eb9b15a82a0d6acbb967e35609ddeb767fa (vllm-nvfp4-tp1-pp1-ab39d94965dfbc763e58acb18470a9d5e794e47b5772efa1a033d488f87e1e0c)
+    # list-model-profiles-1  |   - With LoRA support:
+    # list-model-profiles-1  |     - 65fbe400d9bf1884a84563f182ed45d29ad9c4720e2b4d603f0111be4f9c440d (vllm-bf16-tp2-pp1-lora-32-fb5a60bf24e3da546cea1b5779c1db1394f0f2416e00e0c808eb9c3df6e818ba)
+    # list-model-profiles-1  |     - 1af848be4d70c8dfe9a35a743c117d4f524abf19f5bc39b00fa2311f13f96dd4 (vllm-bf16-tp1-pp1-lora-32-fb5a60bf24e3da546cea1b5779c1db1394f0f2416e00e0c808eb9c3df6e818ba)
     image: nvcr.io/nim/nvidia/llama-3.3-nemotron-super-49b-v1.5:latest
     environment:
       ENABLE_LORA: false
       MODEL_TOKENIZER_PATH: /tokenizers/
+      # By default, we choose 1x GPU NVFP4 profile.
+      NIM_MODEL_PROFILE: {$NIM_MODEL_PROFILE:-73ea7038053e5e103fd92da955a590dad96cdbe1b1aa957049b714f747e014d7}
     deploy:
       resources:
         reservations:
