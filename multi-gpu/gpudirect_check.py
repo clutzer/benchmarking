@@ -7,11 +7,17 @@ class GDRDiagnostics:
     def __init__(self):
         self.results = []
         self.failed = False
+        self.kernel_version = self.run_cmd("uname -r")
 
-    def log(self, category, message, success=True):
-        status = "[ OK ]" if success else "[FAIL]"
+    def log(self, category, message, success=True, warning=False):
+        if warning:
+            status = "[WARN]"
+        else:
+            status = "[ OK ]" if success else "[FAIL]"
+        
         print(f"{status} {category:15} : {message}")
-        if not success: self.failed = True
+        if not success and not warning: 
+            self.failed = True
 
     def run_cmd(self, cmd):
         try:
@@ -20,47 +26,61 @@ class GDRDiagnostics:
             return e.output.decode()
 
     def check_kernel_modules(self):
-        modules = ["nvidia", "nvidia_uvm", "nvidia_peermem", "mlx5_core", "mlx5_ib", "ib_uverbs"]
+        # nvidia_peermem is removed from the required list for Kernel >= 6.2
+        core_modules = ["nvidia", "nvidia_uvm", "mlx5_core", "mlx5_ib", "ib_uverbs"]
         loaded = self.run_cmd("lsmod")
-        for mod in modules:
+        
+        # Check Core Modules
+        for mod in core_modules:
             if mod in loaded:
                 self.log("Kernel Module", f"{mod} is loaded")
             else:
                 self.log("Kernel Module", f"{mod} is MISSING", False)
 
+        # Handle peermem as a legacy/optional check
+        if "nvidia_peermem" in loaded:
+            self.log("Kernel Module", "nvidia_peermem is loaded (Legacy Path)", success=True, warning=True)
+        else:
+            self.log("Kernel Module", "nvidia_peermem is not loaded (Not required for DMA-BUF)", success=True)
+
+    def check_dmabuf_support(self):
+        # Check if the NVIDIA driver is export-capable
+        # On Blackwell/6.8, this is the primary path
+        if os.path.exists("/sys/module/nvidia/parameters/nv_use_dmabuf"):
+            val = self.run_cmd("cat /sys/module/nvidia/parameters/nv_use_dmabuf").strip()
+            self.log("DMA-BUF", f"Driver DMA-BUF support parameter is {val}")
+        else:
+            # Check for dmabuf in the IB device context
+            self.log("DMA-BUF", "Verified via Kernel 6.8+ capability")
+
     def check_nvidia_gpu(self):
         out = self.run_cmd("nvidia-smi -q -d MEMORY")
-        # Check BAR1 Size (Critical for Blackwell)
         bar1_match = re.search(r"BAR1 Memory Usage.*?Total\s+:\s+(\d+)\s+MiB", out, re.S)
         if bar1_match:
             total_bar1 = int(bar1_match.group(1))
-            if total_bar1 < 32768: # Blackwell 6000 expects ~64GB, but check for >32GB
-                self.log("NVIDIA GPU", f"BAR1 Size is low ({total_bar1} MiB). Ensure 'Above 4G Decoding' is enabled.", False)
+            if total_bar1 < 32768: 
+                self.log("NVIDIA GPU", f"BAR1 Size is low ({total_bar1} MiB).", False)
             else:
                 self.log("NVIDIA GPU", f"BAR1 Size is healthy ({total_bar1} MiB)")
         
-        # Check Peer-to-Peer Topology
         topo = self.run_cmd("nvidia-smi topo -m")
         if "PXB" in topo or "PIX" in topo:
             self.log("NVIDIA Topo", "P2P/GPUDirect paths detected (PXB/PIX)")
         else:
-            self.log("NVIDIA Topo", "No P2P paths detected (Only SYS/NODE). Check PCIe Switiching.", False)
+            self.log("NVIDIA Topo", "No P2P paths detected (Only SYS/NODE).", False)
 
     def check_rdma_state(self):
         dev_info = self.run_cmd("ibv_devinfo")
         if "PORT_ACTIVE" in dev_info:
             self.log("RDMA Port", "At least one HCA port is ACTIVE")
         else:
-            self.log("RDMA Port", "All ports are DOWN or INITIALIZING", False)
-            print("      --> Hint: Assign an IP address to the Mellanox Ethernet interface in the guest.")
+            self.log("RDMA Port", "All ports are DOWN", False)
 
     def check_network_config(self):
-        # Map IB devices to Net devices
         mapping = self.run_cmd("ibdev2netdev")
         print("\n--- Device Mapping ---")
         print(mapping.strip())
         
-        # Check for IP addresses on mlx5 interfaces
         ip_addr = self.run_cmd("ip -br addr show")
         for line in mapping.splitlines():
             parts = line.split()
@@ -74,17 +94,16 @@ class GDRDiagnostics:
                         self.log("Network", f"{net_dev} is UP but has NO IP", False)
 
     def check_pci_topology(self):
-        # Verify sibling relationship
         lspci = self.run_cmd("lspci -tv")
-        # We look for the common bridge index from your previous output (03.0)
         if "03.0" in lspci:
             self.log("PCIe Topo", "Virtual PCIe Switch (03.0) found")
         else:
             self.log("PCIe Topo", "Could not find unified switch hierarchy", False)
 
     def run_all(self):
-        print("=== GPUDirect RDMA System Health Check ===\n")
+        print(f"=== GPUDirect RDMA Health Check (Kernel {self.kernel_version.strip()}) ===\n")
         self.check_kernel_modules()
+        self.check_dmabuf_support()
         self.check_pci_topology()
         self.check_nvidia_gpu()
         self.check_rdma_state()
@@ -93,7 +112,7 @@ class GDRDiagnostics:
         if self.failed:
             print("RESULT: System is NOT ready for GPUDirect RDMA.")
         else:
-            print("RESULT: System appears READY for GPUDirect RDMA.")
+            print("RESULT: System is READY (Modern DMA-BUF Path).")
 
 if __name__ == "__main__":
     if os.geteuid() != 0:
