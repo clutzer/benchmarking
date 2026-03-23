@@ -45,13 +45,38 @@ class GDRDiagnostics:
 
     def check_dmabuf_support(self):
         # Check if the NVIDIA driver is export-capable
-        # On Blackwell/6.8, this is the primary path
         if os.path.exists("/sys/module/nvidia/parameters/nv_use_dmabuf"):
             val = self.run_cmd("cat /sys/module/nvidia/parameters/nv_use_dmabuf").strip()
             self.log("DMA-BUF", f"Driver DMA-BUF support parameter is {val}")
         else:
-            # Check for dmabuf in the IB device context
             self.log("DMA-BUF", "Verified via Kernel 6.8+ capability")
+
+    def check_bar_identity_mapping(self):
+        """
+        Detects if the QEMU 'Identity Map' patch is likely active.
+        Standard QEMU BARs are usually low (< 1TB). Physical Blackwell hosts
+        usually map BARs in high-terabyte or petabyte ranges.
+        """
+        lspci_out = self.run_cmd("lspci -vv")
+        # Find 64-bit Memory addresses
+        matches = re.findall(r"Memory at ([0-9a-fA-F]+) \(64-bit, prefetchable\)", lspci_out)
+        
+        if not matches:
+            self.log("Identity Map", "No 64-bit BARs found to analyze.", warning=True)
+            return
+
+        is_high_mem = False
+        for addr_str in matches:
+            addr_val = int(addr_str, 16)
+            # Threshold: 1TB (0x10000000000). QEMU default holes are much lower.
+            if addr_val > 0x10000000000:
+                is_high_mem = True
+                break
+        
+        if is_high_mem:
+            self.log("Identity Map", "Detected High-Memory BARs. QEMU Identity Map is ACTIVE.")
+        else:
+            self.log("Identity Map", "Standard low-memory BARs detected.", warning=True)
 
     def check_nvidia_gpu(self):
         out = self.run_cmd("nvidia-smi -q -d MEMORY")
@@ -64,8 +89,10 @@ class GDRDiagnostics:
                 self.log("NVIDIA GPU", f"BAR1 Size is healthy ({total_bar1} MiB)")
         
         topo = self.run_cmd("nvidia-smi topo -m")
-        if "PXB" in topo or "PIX" in topo:
-            self.log("NVIDIA Topo", "P2P/GPUDirect paths detected (PXB/PIX)")
+        if "PIX" in topo:
+            self.log("NVIDIA Topo", "PIX Detected (Same-Switch P2P). Optimized path active.")
+        elif "PXB" in topo:
+            self.log("NVIDIA Topo", "PXB Detected (Multi-Switch P2P).")
         else:
             self.log("NVIDIA Topo", "No P2P paths detected (Only SYS/NODE).", False)
 
@@ -104,6 +131,7 @@ class GDRDiagnostics:
         print(f"=== GPUDirect RDMA Health Check (Kernel {self.kernel_version.strip()}) ===\n")
         self.check_kernel_modules()
         self.check_dmabuf_support()
+        self.check_bar_identity_mapping()
         self.check_pci_topology()
         self.check_nvidia_gpu()
         self.check_rdma_state()
