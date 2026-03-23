@@ -58,3 +58,20 @@ run-all_reduce_perf-2x-gpu:
 run-mpi-2x-gpu:
 	mpirun -np 2 ./nccl-tests/build/all_reduce_perf -b 8 -e 128M -f 2 -g 1
 
+.PHONY: check-rdma
+check-rdma:
+	@sudo python3 gpudirect_check.py
+
+# Define a 'wait and kill' command
+EXIT_STR = ; echo ''; echo '>>> BENCHMARK COMPLETE <<<'; read -p 'Press [ENTER] to quit all panes...'; tmux kill-session -t rdma_bench
+
+.PHONY: bench-gpudirect-rdma
+bench-gpudirect-rdma:
+	@# 1. Start the server pane
+	@tmux new-session -d -s rdma_bench "./rdma_gpumem_test_server.sh $(EXIT_STR)"
+
+	@# 2. Split and start the client pane
+	@tmux split-window -h -t rdma_bench "./rdma_gpumem_test_client.sh $(EXIT_STR)"
+
+	@# 3. Attach
+	@tmux attach-session -t rdma_bench
