@@ -26,25 +26,23 @@ class GDRDiagnostics:
             return e.output.decode()
 
     def check_kernel_modules(self):
-        # nvidia_peermem is removed from the required list for Kernel >= 6.2
+        # nvidia_peermem is optional/legacy for Kernel >= 6.2
         core_modules = ["nvidia", "nvidia_uvm", "mlx5_core", "mlx5_ib", "ib_uverbs"]
         loaded = self.run_cmd("lsmod")
         
-        # Check Core Modules
         for mod in core_modules:
             if mod in loaded:
                 self.log("Kernel Module", f"{mod} is loaded")
             else:
                 self.log("Kernel Module", f"{mod} is MISSING", False)
 
-        # Handle peermem as a legacy/optional check
         if "nvidia_peermem" in loaded:
             self.log("Kernel Module", "nvidia_peermem is loaded (Legacy Path)", success=True, warning=True)
         else:
             self.log("Kernel Module", "nvidia_peermem is not loaded (Not required for DMA-BUF)", success=True)
 
     def check_dmabuf_support(self):
-        # Check if the NVIDIA driver is export-capable
+        # Essential for Kernel 6.8 + Blackwell
         if os.path.exists("/sys/module/nvidia/parameters/nv_use_dmabuf"):
             val = self.run_cmd("cat /sys/module/nvidia/parameters/nv_use_dmabuf").strip()
             self.log("DMA-BUF", f"Driver DMA-BUF support parameter is {val}")
@@ -53,48 +51,64 @@ class GDRDiagnostics:
 
     def check_bar_identity_mapping(self):
         """
-        Detects if the QEMU 'Identity Map' patch is likely active.
-        Standard QEMU BARs are usually low (< 1TB). Physical Blackwell hosts
-        usually map BARs in high-terabyte or petabyte ranges.
+        Detects Identity Mapping by isolating the 128GB Data BARs.
+        Standard QEMU (Top-Down) pins these to the 64TB+ ceiling (0x3F/0x40).
+        Identity-Mapped BARs land in the 10TB-40TB Physical Zone (0xD/0xE/0xF).
         """
         lspci_out = self.run_cmd("lspci -vv")
-        # Find 64-bit Memory addresses
-        matches = re.findall(r"Memory at ([0-9a-fA-F]+) \(64-bit, prefetchable\)", lspci_out)
+        # Extract addresses specifically for the 128G Data BARs
+        matches = re.findall(r"Memory at ([0-9a-fA-F]+) .*?size=128G", lspci_out)
         
         if not matches:
-            self.log("Identity Map", "No 64-bit BARs found to analyze.", warning=True)
+            self.log("Identity Map", "No 128GB BARs found to analyze.", warning=True)
             return
 
-        is_high_mem = False
-        for addr_str in matches:
-            addr_val = int(addr_str, 16)
-            # Threshold: 1TB (0x10000000000). QEMU default holes are much lower.
-            if addr_val > 0x10000000000:
-                is_high_mem = True
-                break
+        is_identity_mapped = False
+        reasons = []
         
-        if is_high_mem:
-            self.log("Identity Map", "Detected High-Memory BARs. QEMU Identity Map is ACTIVE.")
+        # 1. Zone Check: Standard QEMU is always > 48TB (0x300000000000)
+        for addr_str in matches:
+            addr = int(addr_str, 16)
+            if addr < 0x300000000000:
+                is_identity_mapped = True
+                reasons.append(f"Physical Host Aperture (0x{addr_str[:3]}...)")
+                break
+
+        # 2. Sparsity Check: Standard QEMU packs 128GB BARs tightly.
+        if len(matches) >= 2:
+            addrs = sorted([int(a, 16) for a in matches])
+            gap = addrs[1] - addrs[0]
+            if gap > (150 * 1024**3): # Significant gap (>150GB) suggests physical layout
+                is_identity_mapped = True
+                reasons.append("Non-contiguous Physical Spacing")
+
+        if is_identity_mapped:
+            self.log("Identity Map", f"ACTIVE ({', '.join(set(reasons))})")
         else:
-            self.log("Identity Map", "Standard low-memory BARs detected.", warning=True)
+            self.log("Identity Map", "Standard Virtual Top-Down allocation detected.", warning=True)
+
+    def check_pci_topology(self):
+        # Look for the virtual PCIe switch bridge (03.0)
+        lspci_tree = self.run_cmd("lspci -tv")
+        if "03.0" in lspci_tree:
+            self.log("PCIe Tree", "Virtual PCIe Switch (03.0) found")
+        else:
+            self.log("PCIe Tree", "Unified switch hierarchy not found (Check QEMU config)", False)
 
     def check_nvidia_gpu(self):
         out = self.run_cmd("nvidia-smi -q -d MEMORY")
         bar1_match = re.search(r"BAR1 Memory Usage.*?Total\s+:\s+(\d+)\s+MiB", out, re.S)
         if bar1_match:
             total_bar1 = int(bar1_match.group(1))
-            if total_bar1 < 32768: 
-                self.log("NVIDIA GPU", f"BAR1 Size is low ({total_bar1} MiB).", False)
-            else:
-                self.log("NVIDIA GPU", f"BAR1 Size is healthy ({total_bar1} MiB)")
+            self.log("NVIDIA GPU", f"BAR1 Size healthy ({total_bar1} MiB)" if total_bar1 >= 32768 else f"BAR1 Low ({total_bar1} MiB)", total_bar1 >= 32768)
         
         topo = self.run_cmd("nvidia-smi topo -m")
         if "PIX" in topo:
-            self.log("NVIDIA Topo", "PIX Detected (Same-Switch P2P). Optimized path active.")
+            self.log("NVIDIA Topo", "PIX Detected (Same-Switch P2P)")
         elif "PXB" in topo:
-            self.log("NVIDIA Topo", "PXB Detected (Multi-Switch P2P).")
+            self.log("NVIDIA Topo", "PXB Detected (Multi-Switch P2P)", warning=True)
         else:
-            self.log("NVIDIA Topo", "No P2P paths detected (Only SYS/NODE).", False)
+            self.log("NVIDIA Topo", "No P2P paths (Only SYS/NODE)", False)
 
     def check_rdma_state(self):
         dev_info = self.run_cmd("ibv_devinfo")
@@ -114,21 +128,15 @@ class GDRDiagnostics:
             if len(parts) >= 5:
                 net_dev = parts[-2]
                 if net_dev in ip_addr and "UP" in ip_addr:
+                    # Search for IPv4 address
                     match = re.search(rf"{net_dev}\s+UP\s+(\d+\.\d+\.\d+\.\d+)", ip_addr)
                     if match:
                         self.log("Network", f"{net_dev} has IP {match.group(1)}")
                     else:
                         self.log("Network", f"{net_dev} is UP but has NO IP", False)
 
-    def check_pci_topology(self):
-        lspci = self.run_cmd("lspci -tv")
-        if "03.0" in lspci:
-            self.log("PCIe Topo", "Virtual PCIe Switch (03.0) found")
-        else:
-            self.log("PCIe Topo", "Could not find unified switch hierarchy", False)
-
     def run_all(self):
-        print(f"=== GPUDirect RDMA Health Check (Kernel {self.kernel_version.strip()}) ===\n")
+        print(f"=== GPUDirect RDMA System Health Check (Kernel {self.kernel_version.strip()}) ===\n")
         self.check_kernel_modules()
         self.check_dmabuf_support()
         self.check_bar_identity_mapping()
@@ -138,13 +146,12 @@ class GDRDiagnostics:
         self.check_network_config()
         print("\n==========================================")
         if self.failed:
-            print("RESULT: System is NOT ready for GPUDirect RDMA.")
+            print("RESULT: System is NOT fully optimized for GPUDirect RDMA.")
         else:
             print("RESULT: System is READY (Modern DMA-BUF Path).")
 
 if __name__ == "__main__":
     if os.geteuid() != 0:
-        print("Please run as root (sudo).")
-        sys.exit(1)
+        sys.exit("Please run as root (sudo).")
     diag = GDRDiagnostics()
     diag.run_all()
