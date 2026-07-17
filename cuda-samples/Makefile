@@ -7,7 +7,8 @@ CUDA_SAMPLES := \
 ubuntu_build_cuda_samples:
 	#-rm -rf build
 	@mkdir -p build bin
-	@-(cd build; git clone https://github.com/NVIDIA/cuda-samples.git)
+	#@-(cd build; git clone https://github.com/NVIDIA/cuda-samples.git)
+	@-(cd build; git clone --branch v13.1 --depth 1 https://github.com/NVIDIA/cuda-samples.git)
 	examples_dir=./build/cuda-samples/Samples; \
 	if [ -z "$$examples_dir" ]; then \
 		echo "ERROR: Could not find CUDA samples examples directory"; \
